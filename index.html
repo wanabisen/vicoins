@@ -10,10 +10,17 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .app{max-width:430px;margin:0 auto;padding:12px}
 .topbar{background:#185FA5;border-radius:16px;padding:14px 16px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between}
 .topbar-title{color:#fff;font-size:17px;font-weight:600}
-.topbar-date{color:#B5D4F4;font-size:12px;margin-top:2px}
 .topbar-right{text-align:right;color:#B5D4F4;font-size:11px;line-height:1.6}
 .sync-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#4CAF50;margin-right:4px;vertical-align:middle}
 .sync-dot.off{background:#E24B4A}
+.date-nav{display:flex;align-items:center;justify-content:space-between;background:#fff;border-radius:12px;border:1px solid #E0E8F0;padding:8px 12px;margin-bottom:10px}
+.date-nav-btn{width:34px;height:34px;border-radius:50%;border:1px solid #D0D9E8;background:#F7FAFD;cursor:pointer;font-size:16px;color:#5A7A9A;display:flex;align-items:center;justify-content:center;transition:all .15s;flex-shrink:0}
+.date-nav-btn:active{background:#E6F1FB}
+.date-nav-btn:disabled{opacity:.3;cursor:default}
+.date-nav-center{text-align:center;flex:1}
+.date-nav-day{font-size:15px;font-weight:600;color:#1A2B3C}
+.date-nav-full{font-size:11px;color:#8A9BB0;margin-top:1px}
+.past-badge{display:inline-block;background:#FFF3E0;color:#854F0B;font-size:10px;font-weight:600;padding:2px 8px;border-radius:5px;margin-top:3px}
 .user-switch{display:flex;gap:6px;margin-bottom:10px}
 .user-btn{flex:1;padding:9px;border-radius:10px;border:1.5px solid #D0D9E8;background:#fff;cursor:pointer;font-size:14px;font-weight:500;color:#5A7A9A;transition:all .15s}
 .user-btn.active{border-color:#185FA5;background:#E6F1FB;color:#0C447C}
@@ -65,6 +72,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .bottom-btns{display:flex;gap:8px;margin-top:14px;margin-bottom:20px}
 .bottom-btn{flex:1;padding:10px;border-radius:10px;border:1px solid #D0D9E8;background:#fff;cursor:pointer;font-size:13px;color:#5A7A9A;font-weight:500}
 .bottom-btn:active{background:#EAF1F8}
+.bottom-btn.disabled{opacity:.4;cursor:default}
 .loading{text-align:center;padding:40px 20px;color:#8A9BB0;font-size:14px}
 </style>
 </head>
@@ -73,12 +81,21 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
   <div class="topbar">
     <div>
       <div class="topbar-title">⭐ Vic Coins</div>
-      <div class="topbar-date" id="topbar-date"></div>
     </div>
     <div class="topbar-right">
       <span class="sync-dot" id="sync-dot"></span><span id="sync-label">Conectando...</span><br>
       200 VC = 1€
     </div>
+  </div>
+
+  <div class="date-nav">
+    <button class="date-nav-btn" id="btn-prev" onclick="changeDay(-1)">&#8592;</button>
+    <div class="date-nav-center">
+      <div class="date-nav-day" id="nav-day"></div>
+      <div class="date-nav-full" id="nav-full"></div>
+      <div id="nav-badge"></div>
+    </div>
+    <button class="date-nav-btn" id="btn-next" onclick="changeDay(1)" disabled>&#8594;</button>
   </div>
 
   <div class="user-switch">
@@ -92,7 +109,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
     <div>
       <div style="display:flex;align-items:baseline;gap:6px">
         <span class="pts-num" id="pts-total">0</span>
-        <span class="pts-label">Vic Coins hoy</span>
+        <span class="pts-label" id="pts-label">Vic Coins hoy</span>
       </div>
     </div>
     <div class="pts-right">
@@ -118,13 +135,13 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
   <div id="main-content"><div class="loading">Cargando...</div></div>
 
   <div class="log-section">
-    <div class="block-label">Registro de hoy</div>
-    <div id="log-list"><div style="font-size:13px;color:#8A9BB0;padding:8px 0">Sin actividad todavía</div></div>
+    <div class="block-label" id="log-title">Registro del día</div>
+    <div id="log-list"></div>
   </div>
 
   <div class="bottom-btns">
-    <button class="bottom-btn" onclick="resetDay()">🔄 Nuevo día</button>
-    <button class="bottom-btn" onclick="showStats()">📊 Ver semana</button>
+    <button class="bottom-btn" id="btn-reset" onclick="resetDay()">🔄 Nuevo día</button>
+    <button class="bottom-btn" onclick="showStats()">📊 Ver hucha</button>
   </div>
 </div>
 
@@ -161,28 +178,59 @@ const TASKS_TARDE = [
 ];
 const ALL_TASKS = [...TASKS_MANANA, ...TASKS_TARDE];
 
-const TODAY = new Date().toISOString().slice(0,10);
-const dayRef = doc(db, 'rutina', TODAY);
 const configRef = doc(db, 'config', 'global');
 
-let state = {done:{}, bonusDone:{}, log:[], huchaTotal:0, goal:{name:'', vc:0}};
+let state = { done:{}, bonusDone:{}, log:[] };
+let globalConfig = { huchaTotal:0, goal:{name:'', vc:0} };
 let currentUser = localStorage.getItem('viccoins_user') || 'Mamá';
+let currentOffset = 0;
+let unsubscribeDay = null;
+
+function dateFromOffset(offset) {
+  const d = new Date();
+  d.setDate(d.getDate() + offset);
+  return d;
+}
+
+function dateStrFromOffset(offset) {
+  const d = dateFromOffset(offset);
+  return d.toISOString().slice(0,10);
+}
+
+function isToday() { return currentOffset === 0; }
 
 function setSync(ok) {
   document.getElementById('sync-dot').className = 'sync-dot' + (ok ? '' : ' off');
   document.getElementById('sync-label').textContent = ok ? 'Sincronizado' : 'Sin conexión';
 }
 
+function updateDateNav() {
+  const d = dateFromOffset(currentOffset);
+  const dayName = d.toLocaleDateString('es-ES', {weekday:'long'});
+  const fullDate = d.toLocaleDateString('es-ES', {day:'numeric', month:'long', year:'numeric'});
+  document.getElementById('nav-day').textContent = isToday() ? 'Hoy — ' + dayName.charAt(0).toUpperCase() + dayName.slice(1) : dayName.charAt(0).toUpperCase() + dayName.slice(1);
+  document.getElementById('nav-full').textContent = fullDate;
+  const badge = document.getElementById('nav-badge');
+  badge.innerHTML = isToday() ? '' : '<span class="past-badge">Día anterior — editable</span>';
+  document.getElementById('btn-next').disabled = isToday();
+  document.getElementById('pts-label').textContent = isToday() ? 'Vic Coins hoy' : 'Vic Coins ese día';
+  document.getElementById('log-title').textContent = isToday() ? 'Registro de hoy' : 'Registro del día';
+  const resetBtn = document.getElementById('btn-reset');
+  resetBtn.className = 'bottom-btn' + (isToday() ? '' : ' disabled');
+  resetBtn.textContent = isToday() ? '🔄 Nuevo día' : '🔄 Solo día actual';
+}
+
 async function saveDay() {
   try {
-    await setDoc(dayRef, {done: state.done, bonusDone: state.bonusDone, log: state.log}, {merge:true});
+    const ref = doc(db, 'rutina', dateStrFromOffset(currentOffset));
+    await setDoc(ref, { done: state.done, bonusDone: state.bonusDone, log: state.log }, {merge:true});
     setSync(true);
   } catch(e) { setSync(false); }
 }
 
 async function saveConfig() {
   try {
-    await setDoc(configRef, {huchaTotal: state.huchaTotal, goal: state.goal}, {merge:true});
+    await setDoc(configRef, { huchaTotal: globalConfig.huchaTotal, goal: globalConfig.goal }, {merge:true});
   } catch(e) {}
 }
 
@@ -190,7 +238,7 @@ function calcTotal() {
   let t = 0;
   ALL_TASKS.forEach(task => {
     if (state.done[task.id]) t += task.pts;
-    if (state.bonusDone[task.id]) t += task.bonus;
+    if (state.bonusDone[task.id] === true) t += task.bonus;
   });
   return t;
 }
@@ -199,10 +247,10 @@ function render() {
   const total = calcTotal();
   document.getElementById('pts-total').textContent = total;
   document.getElementById('pts-max').textContent = total + ' / 150 máx';
-  const huchaDisplay = Math.round(state.huchaTotal + total);
+  const huchaDisplay = Math.round(globalConfig.huchaTotal + (isToday() ? total : 0));
   document.getElementById('pts-hucha').textContent = 'Hucha: ' + huchaDisplay + ' VC (' + (huchaDisplay/200).toFixed(1) + '€)';
 
-  const g = state.goal;
+  const g = globalConfig.goal;
   if (g.vc > 0) {
     const pct = Math.min(100, Math.round(huchaDisplay / g.vc * 100));
     document.getElementById('prog-fill').style.width = pct + '%';
@@ -213,27 +261,25 @@ function render() {
   }
 
   document.getElementById('tablet-banner').className = 'tablet-banner' + (state.done['deb'] ? ' show' : '');
-
   renderTasks();
   renderLog();
 }
 
 function renderTasks() {
-  const html = `
+  document.getElementById('main-content').innerHTML = `
     <div class="block-label">🌅 Bloque mañana</div>
     ${TASKS_MANANA.map(t => taskHTML(t)).join('')}
     <div class="block-label">🌇 Bloque tarde</div>
     ${TASKS_TARDE.map(t => taskHTML(t)).join('')}
   `;
-  document.getElementById('main-content').innerHTML = html;
   ALL_TASKS.forEach(task => {
     const el = document.getElementById('task-'+task.id);
     if (el) el.onclick = () => toggleTask(task);
     if (task.bonus > 0) {
-      const yesBtn = document.getElementById('bonus-yes-'+task.id);
-      const noBtn = document.getElementById('bonus-no-'+task.id);
-      if (yesBtn) yesBtn.onclick = () => grantBonus(task.id, task.bonus, task.name);
-      if (noBtn) noBtn.onclick = () => denyBonus(task.id);
+      const yb = document.getElementById('bonus-yes-'+task.id);
+      const nb = document.getElementById('bonus-no-'+task.id);
+      if (yb) yb.onclick = () => grantBonus(task.id, task.bonus, task.name);
+      if (nb) nb.onclick = () => denyBonus(task.id);
     }
   });
 }
@@ -264,17 +310,16 @@ function taskHTML(task) {
         <button class="bonus-btn yes" id="bonus-yes-${task.id}">Sí, +${task.bonus} VC</button>
         <button class="bonus-btn" id="bonus-no-${task.id}">No esta vez</button>
       </div>
-    </div>` : ''}
-  `;
+    </div>` : ''}`;
 }
 
 function renderLog() {
   const el = document.getElementById('log-list');
   if (!state.log || !state.log.length) {
-    el.innerHTML = '<div style="font-size:13px;color:#8A9BB0;padding:8px 0">Sin actividad todavía</div>';
+    el.innerHTML = '<div style="font-size:13px;color:#8A9BB0;padding:8px 0">Sin actividad registrada</div>';
     return;
   }
-  el.innerHTML = [...state.log].reverse().slice(0,12).map(e => `
+  el.innerHTML = [...state.log].reverse().slice(0,15).map(e => `
     <div class="log-entry">
       <div class="log-dot ${e.pts < 0 ? 'neg':''}"></div>
       <div class="log-text">${e.text}</div>
@@ -283,12 +328,41 @@ function renderLog() {
     </div>`).join('');
 }
 
+function subscribeToDay() {
+  if (unsubscribeDay) { unsubscribeDay(); unsubscribeDay = null; }
+  const ref = doc(db, 'rutina', dateStrFromOffset(currentOffset));
+  unsubscribeDay = onSnapshot(ref, (snap) => {
+    if (snap.exists()) {
+      const d = snap.data();
+      state.done = d.done || {};
+      state.bonusDone = d.bonusDone || {};
+      state.log = d.log || [];
+    } else {
+      state.done = {};
+      state.bonusDone = {};
+      state.log = [];
+    }
+    setSync(true);
+    render();
+  }, () => { setSync(false); render(); });
+}
+
+window.changeDay = function(delta) {
+  const next = currentOffset + delta;
+  if (next > 0) return;
+  currentOffset = next;
+  updateDateNav();
+  document.getElementById('main-content').innerHTML = '<div class="loading">Cargando...</div>';
+  document.getElementById('log-list').innerHTML = '';
+  subscribeToDay();
+};
+
 window.switchUser = function(u) {
   currentUser = u;
   localStorage.setItem('viccoins_user', u);
   document.getElementById('btn-mama').className = 'user-btn' + (u==='Mamá'?' active':'');
   document.getElementById('btn-papa').className = 'user-btn' + (u==='Papá'?' active':'');
-}
+};
 
 window.toggleTask = function(task) {
   const wasDone = !!state.done[task.id];
@@ -302,47 +376,41 @@ window.toggleTask = function(task) {
     const lost = task.pts + (hadBonus ? task.bonus : 0);
     if (lost > 0) addLog('Deshecho: ' + task.name, -lost);
   }
-  saveDay();
-  render();
-}
+  saveDay(); render();
+};
 
 window.grantBonus = function(taskId, pts, name) {
   state.bonusDone[taskId] = true;
   addLog('Bonus: ' + name, pts);
-  saveDay();
-  render();
-}
+  saveDay(); render();
+};
 
 window.denyBonus = function(taskId) {
   state.bonusDone[taskId] = 'denied';
-  saveDay();
-  render();
-}
+  saveDay(); render();
+};
 
 window.saveGoal = function() {
   const name = document.getElementById('goal-name').value.trim();
   const vc = parseInt(document.getElementById('goal-vc').value);
   if (name && vc > 0) {
-    state.goal = {name, vc};
-    saveConfig();
-    render();
+    globalConfig.goal = {name, vc};
+    saveConfig(); render();
   }
-}
+};
 
 window.resetDay = function() {
+  if (!isToday()) return;
   if (!confirm('¿Cerrar el día de hoy? Los puntos se añaden a la hucha.')) return;
-  state.huchaTotal = Math.round(state.huchaTotal + calcTotal());
-  state.done = {};
-  state.bonusDone = {};
-  state.log = [];
-  saveDay();
-  saveConfig();
-  render();
-}
+  globalConfig.huchaTotal = Math.round(globalConfig.huchaTotal + calcTotal());
+  state.done = {}; state.bonusDone = {}; state.log = [];
+  saveDay(); saveConfig(); render();
+};
 
 window.showStats = function() {
-  alert('Hucha total: ' + Math.round(state.huchaTotal + calcTotal()) + ' Vic Coins\n= ' + ((state.huchaTotal + calcTotal())/200).toFixed(2) + '€\n\nObjetivo: ' + (state.goal.name || '—') + '\nNecesitas: ' + (state.goal.vc || '—') + ' VC');
-}
+  const total = Math.round(globalConfig.huchaTotal + (isToday() ? calcTotal() : 0));
+  alert('Hucha total: ' + total + ' Vic Coins\n= ' + (total/200).toFixed(2) + '€\n\nObjetivo: ' + (globalConfig.goal.name||'—') + '\nNecesitas: ' + (globalConfig.goal.vc||'—') + ' VC');
+};
 
 function addLog(text, pts) {
   if (!state.log) state.log = [];
@@ -354,38 +422,20 @@ function addLog(text, pts) {
   });
 }
 
-const today = new Date();
-document.getElementById('topbar-date').textContent = today.toLocaleDateString('es-ES',{weekday:'long',day:'numeric',month:'long'});
 document.getElementById('btn-mama').className = 'user-btn' + (currentUser==='Mamá'?' active':'');
 document.getElementById('btn-papa').className = 'user-btn' + (currentUser==='Papá'?' active':'');
 
 async function init() {
   try {
-    const configSnap = await getDoc(configRef);
-    if (configSnap.exists()) {
-      const d = configSnap.data();
-      state.huchaTotal = d.huchaTotal || 0;
-      state.goal = d.goal || {name:'', vc:0};
-    }
-  } catch(e) {}
-
-  onSnapshot(dayRef, (snap) => {
+    const snap = await getDoc(configRef);
     if (snap.exists()) {
       const d = snap.data();
-      state.done = d.done || {};
-      state.bonusDone = d.bonusDone || {};
-      state.log = d.log || [];
-    } else {
-      state.done = {};
-      state.bonusDone = {};
-      state.log = [];
+      globalConfig.huchaTotal = d.huchaTotal || 0;
+      globalConfig.goal = d.goal || {name:'', vc:0};
     }
-    setSync(true);
-    render();
-  }, () => {
-    setSync(false);
-    render();
-  });
+  } catch(e) {}
+  updateDateNav();
+  subscribeToDay();
 }
 
 init();
