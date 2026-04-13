@@ -408,8 +408,21 @@ window.resetDay = function() {
 };
 
 window.showStats = function() {
-  const total = Math.round(globalConfig.huchaTotal + (isToday() ? calcTotal() : 0));
-  alert('Hucha total: ' + total + ' Vic Coins\n= ' + (total/200).toFixed(2) + '€\n\nObjetivo: ' + (globalConfig.goal.name||'—') + '\nNecesitas: ' + (globalConfig.goal.vc||'—') + ' VC');
+  const huchaBase = Math.round(globalConfig.huchaTotal);
+  const hoy = calcTotal();
+  const total = huchaBase + hoy;
+  const g = globalConfig.goal;
+  const pct = g.vc > 0 ? Math.min(100, Math.round(total / g.vc * 100)) : 0;
+  let msg = 'Hucha acumulada: ' + huchaBase + ' VC\n';
+  msg += 'Puntos de hoy: +' + hoy + ' VC\n';
+  msg += '─────────────────\n';
+  msg += 'Total: ' + total + ' VC = ' + (total/200).toFixed(2) + '€\n\n';
+  msg += 'Objetivo: ' + (g.name||'—') + '\n';
+  if (g.vc > 0) {
+    msg += 'Progreso: ' + pct + '% (' + total + ' / ' + g.vc + ' VC)\n';
+    msg += 'Faltan: ' + Math.max(0, g.vc - total) + ' VC';
+  }
+  alert(msg);
 };
 
 function addLog(text, pts) {
